@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="EnergiScan - Kalkulator konsumsi energi dan simulasi tagihan listrik rumah berbasis golongan PLN.">
+<title>EnergiScan Premium</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+<!-- POPUP MASKOT VECTO -->
+<div id="vecto-popup" class="popup-overlay hidden">
+  <div class="popup-card">
+    <img src="maskot/vecto-happy.png" id="vecto-img" class="vecto-img">
+    <h2 id="v-title">Halo!</h2>
+    <p id="v-msg">Selamat datang di EnergiScan</p>
+    <button onclick="tutupPopup()" class="btn-main">Mulai Sekarang ⚡</button>
+  </div>
+</div>
+
+<!-- APP WRAPPER -->
+<div class="app-wrapper">
+
+<!-- HEADER -->
+<header class="app-header">
+  <h1>Energi<span>Scan</span></h1>
+  <p>Implementasi Konsep Vektor Dalam Perhitungan Energi Listrik Berbasis Web</p>
+</header>
+
+<!-- PAGE 1: LANDING -->
+<section id="p-landing" class="screen active">
+  <div class="hero-box">
+    <img src="maskot/vecto-happy.png" class="hero-vecto">
+    <h2>Analisis Energi Rumah Lebih Cerdas ⚡</h2>
+    <p>Hitung tagihan listrik, lihat konsumsi alat, dan pahami konsep vektor resultan daya rumahmu.</p>
+    <button onclick="navigasi('p-setup')" class="btn-main">Mulai Sekarang</button>
+  </div>
+</section>
+
+<!-- PAGE 2: SETUP DAYA -->
+<section id="p-setup" class="screen">
+  <div class="calc-grid">
+
+    <div>
+      <h2>Pilih Daya Rumah</h2>
+      <div class="glass-card no-hover">
+        <label style="font-weight:600;">Golongan Daya Tersambung (VA)</label>
+        <select id="select-va" class="modern-input">
+          <option selected disabled>-- Pilih Golongan VA --</option>
+          <option value="415" data-va="450">450 VA (Subsidi)</option>
+          <option value="605" data-va="900">900 VA (Subsidi)</option>
+          <option value="1352" data-va="1300">1300 VA</option>
+          <option value="1444" data-va="2200">2200 VA</option>
+          <option value="1699" data-va="3500">3500+ VA</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="info-tarif" class="direct-info">
+      <h3>💡 Informasi</h3>
+      <p>Pilih daya rumah untuk melihat tarif listrik per kWh dan melanjutkan ke input alat.</p>
+    </div>
+
+  </div>
+  <div class="btn-container">
+    <button onclick="navigasi('p-landing')" class="btn-sec">Kembali</button>
+    <button id="btn-next" onclick="navigasi('p-calc')" class="btn-main" disabled>Lanjut ➔</button>
+  </div>
+</section>
+
+<!-- PAGE 3: INPUT ALAT -->
+<section id="p-calc" class="screen">
+  <div class="calc-grid">
+
+    <div>
+      <h2>Input Peralatan Elektronik</h2>
+
+      <div class="glass-card no-hover">
+        <label style="font-weight:600; font-size:0.9rem;">⚡ Tambah Cepat dari Preset:</label>
+        <div id="preset-grid" class="preset-grid"></div>
+      </div>
+
+      <div id="list-alat"></div>
+
+      <button id="add-item" class="btn-sec full-btn" style="border: 2px dashed #cbd5e1; margin-top:10px;">
+        + Tambah Alat Manual
+      </button>
+
+      <!-- PERINGATAN KONTEKSTUAL -->
+      <div id="warning-beban" class="warning-beban-card" style="display:none;"></div>
+    </div>
+
+    <div>
+      <div class="direct-info">
+        <h3>⚡ Edukasi Cepat</h3>
+        <p>Watt menunjukkan besar daya alat. Semakin besar watt dan semakin lama dipakai, semakin tinggi konsumsi energi.</p>
+        <hr style="margin:12px 0; border-color:#bfdbfe;">
+        <p><b>Rumus dasar:</b><br>Energi (kWh) = Watt × Jam × Hari ÷ 1000</p>
+        <hr style="margin:12px 0; border-color:#bfdbfe;">
+        <p style="font-size:0.85rem;"><b>Estimasi watt umum:</b></p>
+        <ul style="font-size:0.82rem; margin-top:8px; padding-left:16px; color:#475569; line-height:1.9;">
+          <li>Lampu LED: 5–15 W</li>
+          <li>TV LED: 50–100 W</li>
+          <li>Kulkas: 70–150 W</li>
+          <li>AC ½ PK: 350–400 W</li>
+          <li>Setrika: 300–400 W</li>
+        </ul>
+      </div>
+    </div>
+
+  </div>
+  <div class="btn-container">
+    <button onclick="navigasi('p-setup')" class="btn-sec">Kembali</button>
+    <button onclick="prosesData()" class="btn-main">Hitung Sekarang ➔</button>
+  </div>
+</section>
+
+<!-- PAGE 4: HASIL -->
+<section id="p-result" class="screen">
+
+  <div class="result-header">
+    <div class="res-card">
+      <span>Konsumsi Energi</span>
+      <h2 id="out-kwh">0 kWh</h2>
+    </div>
+    <div class="res-card blue">
+      <span>Estimasi Tagihan</span>
+      <h2 id="out-rp">Rp 0</h2>
+    </div>
+  </div>
+
+  <!-- Chart + Tips -->
+  <div class="calc-grid">
+    <div class="glass-card no-hover">
+      <canvas id="myChart"></canvas>
+    </div>
+    <div id="v-tips" class="direct-info"></div>
+  </div>
+
+  <!-- Triple Info -->
+  <div class="triple-grid">
+    <div class="glass-card">
+      <h3>🏠 Profil Rumah</h3>
+      <div id="profil-rumah"></div>
+    </div>
+    <div class="glass-card">
+      <h3>📘 Fakta Energi</h3>
+      <div id="fakta-energi"></div>
+    </div>
+    <div class="glass-card">
+      <h3>💡 Rekomendasi Vecto</h3>
+      <div id="ai-analisa"></div>
+    </div>
+  </div>
+
+  <!-- Visualisasi Vektor -->
+  <div class="glass-card vector-box no-hover">
+    <h3>📐 Visualisasi Vektor Beban Listrik</h3>
+    <canvas id="vectorCanvas"></canvas>
+    <div id="vektor-output" class="vektor-output"></div>
+  </div>
+
+  <!-- Simulasi Hemat -->
+  <div class="glass-card no-hover simulasi-card">
+    <h3>🎛️ Simulasi Hemat</h3>
+    <p style="font-size:0.85rem; color:#64748b; margin: 8px 0 16px;">Geser slider untuk kurangi jam pemakaian dan lihat potensi penghematan real-time:</p>
+    <div id="simulasi-list"></div>
+    <p id="total-hemat" style="display:none;"></p>
+  </div>
+
+  <button onclick="navigasi('p-calc')" class="btn-sec full-btn">Edit Data Lagi</button>
+
+</section>
+
+</div><!-- end app-wrapper -->
+
+<script src="script.js"></script>
+</body>
+</html>
