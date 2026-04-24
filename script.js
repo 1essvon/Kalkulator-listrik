@@ -303,76 +303,111 @@ function updateKontekstualWarning() {
    PROSES DATA
 ================================================== */
 function prosesData() {
-  const rows = document.querySelectorAll(".alat-row");
+  const rows    = document.querySelectorAll(".alat-row");
+  const btnHitung = document.getElementById("btn-hitung");
 
-  let totalKwh = 0;
-  const labels = [], values = [];
-  lastResults  = [];
+  // Loading state
+  btnHitung.innerText  = "Menghitung... ⏳";
+  btnHitung.disabled   = true;
 
-  // Hitung hari bulan ini secara dinamis
-  const hariSebulan = new Date(
-    new Date().getFullYear(),
-    new Date().getMonth() + 1,
-    0
-  ).getDate();
+  // Beri sedikit jeda agar browser render loading state dulu
+  setTimeout(() => {
+    let totalKwh = 0;
+    const labels = [], values = [];
+    lastResults  = [];
+    let adaError = false;
 
-  rows.forEach(row => {
-    const nama = row.querySelector(".n").value.trim() || "Alat";
-    const watt = Math.abs(parseFloat(row.querySelector(".w").value)) || 0;
-    const jam  = Math.abs(parseFloat(row.querySelector(".j").value)) || 0;
+    const hariSebulan = new Date(
+      new Date().getFullYear(),
+      new Date().getMonth() + 1,
+      0
+    ).getDate();
 
-    if (watt > 0 && jam > 0) {
-      const kwh = (watt * jam * hariSebulan) / 1000;
-      totalKwh += kwh;
-      labels.push(nama);
-      values.push(parseFloat(kwh.toFixed(2)));
-      lastResults.push({ nama, watt, jam, kwh });
+    rows.forEach(row => {
+      const nama    = row.querySelector(".n").value.trim() || "Alat";
+      const wattRaw = parseFloat(row.querySelector(".w").value);
+      const jamRaw  = parseFloat(row.querySelector(".j").value);
+
+      // Validasi ketat: harus positif, jam 0–24
+      const watt = (!isNaN(wattRaw) && wattRaw > 0)   ? wattRaw  : 0;
+      const jam  = (!isNaN(jamRaw)  && jamRaw  > 0 && jamRaw <= 24) ? jamRaw : 0;
+
+      // Highlight input yang salah
+      const wInput = row.querySelector(".w");
+      const jInput = row.querySelector(".j");
+
+      wInput.style.borderColor = (wattRaw > 0 || isNaN(wattRaw)) ? "" : "#ef4444";
+      jInput.style.borderColor = (jamRaw > 0 && jamRaw <= 24) || isNaN(jamRaw) ? "" : "#ef4444";
+
+      if (!isNaN(jamRaw) && jamRaw > 24) adaError = true;
+
+      if (watt > 0 && jam > 0) {
+        const kwh = (watt * jam * hariSebulan) / 1000;
+        totalKwh += kwh;
+        labels.push(nama);
+        values.push(parseFloat(kwh.toFixed(2)));
+        lastResults.push({ nama, watt, jam, kwh });
+      }
+    });
+
+    // Reset button
+    btnHitung.innerText = "Hitung Sekarang ➔";
+    btnHitung.disabled  = false;
+
+    if (adaError) {
+      tampilkanVecto(
+        "Jam Tidak Valid ⏰",
+        "Jam pemakaian maksimal 24 jam/hari. Cek input yang ditandai merah.",
+        "confused"
+      );
+      return;
     }
-  });
 
-  if (totalKwh <= 0) {
-    tampilkanVecto(
-      "Data Belum Lengkap 😅",
-      "Isi nama alat, watt, dan jam pemakaian dulu ya.",
-      "confused"
-    );
-    return;
-  }
+    if (totalKwh <= 0) {
+      tampilkanVecto(
+        "Data Belum Lengkap 😅",
+        "Isi watt dan jam pemakaian dulu ya — keduanya harus lebih dari 0.",
+        "confused"
+      );
+      return;
+    }
 
-  const totalRp = totalKwh * currentTarif;
+    const totalRp = totalKwh * currentTarif;
+    document.getElementById("out-kwh").innerText = totalKwh.toFixed(1) + " kWh";
+    document.getElementById("out-rp").innerText  = "Rp " + totalRp.toLocaleString("id-ID");
 
-  document.getElementById("out-kwh").innerText = totalKwh.toFixed(1) + " kWh";
-  document.getElementById("out-rp").innerText  = "Rp " + totalRp.toLocaleString("id-ID");
+    navigasi("p-result");
 
-  navigasi("p-result");
+    updateChart(labels, values);
+    updateTips(totalKwh);
+    updateSimulasi();
+    updateInfoTambahan(totalKwh);
 
-  updateChart(labels, values);
-  updateTips(totalKwh);
-  updateSimulasi();
-  updateInfoTambahan(totalKwh);
-  gambarVektor();
+    // setTimeout agar canvas sudah ter-render dan offsetWidth benar
+    setTimeout(() => gambarVektor(), 120);
 
-  // Smart Diagnosis
-  const biang = lastResults.find(r => (r.kwh / totalKwh) > 0.4);
-  if (biang) {
-    tampilkanVecto(
-      "🔍 Ketemu Biang Borosnya!",
-      `"${biang.nama}" memakan lebih dari 40% total listrikmu. Kurangi jam pakainya!`,
-      "shock"
-    );
-  } else if (totalKwh > 200) {
-    tampilkanVecto(
-      "⚠️ Konsumsi Cukup Tinggi!",
-      "Lihat grafik dan simulasi hemat di bawah untuk menemukan cara berhemat.",
-      "confused"
-    );
-  } else {
-    tampilkanVecto(
-      "Analisis Selesai 🚀",
-      "Konsumsimu masih wajar. Scroll ke bawah untuk lihat detail lengkap!",
-      "happy"
-    );
-  }
+    // Smart Diagnosis
+    const biang = lastResults.find(r => (r.kwh / totalKwh) > 0.4);
+    if (biang) {
+      tampilkanVecto(
+        "🔍 Ketemu Biang Borosnya!",
+        `"${biang.nama}" memakan lebih dari 40% total listrikmu. Kurangi jam pakainya!`,
+        "shock"
+      );
+    } else if (totalKwh > 200) {
+      tampilkanVecto(
+        "⚠️ Konsumsi Cukup Tinggi!",
+        "Lihat grafik dan simulasi hemat di bawah untuk menemukan cara berhemat.",
+        "confused"
+      );
+    } else {
+      tampilkanVecto(
+        "Analisis Selesai 🚀",
+        "Konsumsimu masih wajar. Scroll ke bawah untuk detail vektor dan simulasi hemat!",
+        "happy"
+      );
+    }
+  }, 80);
 }
 
 /* ==================================================
@@ -481,97 +516,305 @@ function updateInfoTambahan(totalKwh) {
 }
 
 /* ==================================================
-   VISUALISASI VEKTOR (responsive + normalisasi)
+   VISUALISASI VEKTOR — FULL UPGRADE
+   Grid kartesian proper + animasi sequential +
+   rumus matematis + edukasi step-by-step
 ================================================== */
+
+let vektorAnimFrame = null;
+
+function replayVektor() { gambarVektor(); }
+
 function gambarVektor() {
   const canvas = document.getElementById("vectorCanvas");
   const ctx    = canvas.getContext("2d");
 
-  // Set resolusi canvas sesuai lebar aktual (fix mobile distorsi)
-  const W = canvas.offsetWidth || 600;
-  const H = Math.round(W * 0.52);
+  const W = canvas.offsetWidth || 680;
+  const H = Math.round(W * 0.62);
   canvas.width  = W;
   canvas.height = H;
 
-  ctx.clearRect(0, 0, W, H);
-
-  const ox = Math.round(W * 0.12);
-  const oy = Math.round(H * 0.82);
-
-  // Gambar sumbu
-  ctx.strokeStyle = "#334155";
-  ctx.lineWidth   = 2;
-  ctx.beginPath();
-  ctx.moveTo(ox, H * 0.08);
-  ctx.lineTo(ox, oy);
-  ctx.lineTo(W * 0.94, oy);
-  ctx.stroke();
-
-  // Label sumbu
-  ctx.fillStyle  = "#64748b";
-  ctx.font       = `${Math.max(11, W * 0.018)}px Segoe UI`;
-  ctx.fillText("Daya Ringan (W)", W * 0.5, oy + 28);
-  ctx.save();
-  ctx.translate(ox - 24, H * 0.4);
-  ctx.rotate(-Math.PI / 2);
-  ctx.fillText("Daya Sedang/Berat (W)", 0, 0);
-  ctx.restore();
-
-  // Pisahkan alat ringan (≤100W) vs sedang-berat (>100W)
   let ringan = 0, sedang = 0;
+  const detailRingan = [], detailSedang = [];
   lastResults.forEach(r => {
-    if (r.watt <= 100) ringan += r.watt;
-    else               sedang += r.watt;
+    if (r.watt <= 100) { ringan += r.watt; detailRingan.push(r); }
+    else               { sedang += r.watt; detailSedang.push(r); }
   });
 
-  // Normalisasi agar panah selalu muat di canvas
-  const maxX    = W * 0.78 - ox;
-  const maxY    = oy - H * 0.1;
-  const rawX    = ringan;
-  const rawY    = sedang;
-  const scale   = Math.min(maxX / (rawX || 1), maxY / (rawY || 1), 0.45);
+  const R        = Math.sqrt(ringan ** 2 + sedang ** 2);
+  const theta    = ringan > 0 ? Math.atan2(sedang, ringan) : Math.PI / 2;
+  const thetaDeg = (theta * 180 / Math.PI).toFixed(2);
+  const ux       = R > 0 ? (ringan / R).toFixed(4) : "0";
+  const uy       = R > 0 ? (sedang / R).toFixed(4) : "0";
 
-  const px = ox + rawX * scale;
-  const py = oy - rawY * scale;
+  const pad  = { left: W * 0.14, right: W * 0.06, top: H * 0.08, bottom: H * 0.14 };
+  const ox   = pad.left;
+  const oy   = H - pad.bottom;
+  const gW   = W - pad.left - pad.right;
+  const gH   = H - pad.top  - pad.bottom;
 
-  // Gambar tiga panah
-  if (rawX > 0) drawArrow(ctx, ox, oy, px, oy,  "#22c55e", W);
-  if (rawY > 0) drawArrow(ctx, ox, oy, ox, py,  "#f59e0b", W);
-  if (rawX > 0 || rawY > 0) drawArrow(ctx, ox, oy, px, py, "#3d5afe", W);
+  const maxVal = Math.max(ringan, sedang, 100);
+  const scale  = (Math.min(gW, gH) * 0.78) / maxVal;
+  const px     = ox + ringan * scale;
+  const py     = oy - sedang * scale;
 
-  // Label panah
-  const fs = Math.max(11, W * 0.018);
-  ctx.font = `600 ${fs}px Segoe UI`;
-  if (rawX > 0) { ctx.fillStyle = "#22c55e"; ctx.fillText(`X: ${ringan} W`, (ox + px) / 2, oy - 10); }
-  if (rawY > 0) { ctx.fillStyle = "#f59e0b"; ctx.fillText(`Y: ${sedang} W`, ox + 8, (oy + py) / 2); }
-  if (rawX > 0 || rawY > 0) { ctx.fillStyle = "#3d5afe"; ctx.fillText("Resultan", px + 8, py - 6); }
+  function hitungStep(max) {
+    for (const c of [10,20,25,50,100,150,200,250,500,1000]) {
+      if (max / c <= 8) return c;
+    }
+    return Math.ceil(max / 5 / 100) * 100;
+  }
 
-  const R = Math.sqrt(ringan ** 2 + sedang ** 2);
+  function kepalaPanah(x, y, angle, color) {
+    const s = Math.max(8, W * 0.014);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x - s * Math.cos(angle - 0.4), y - s * Math.sin(angle - 0.4));
+    ctx.lineTo(x - s * Math.cos(angle + 0.4), y - s * Math.sin(angle + 0.4));
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function gambarGrid() {
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = "#fafbff";
+    ctx.fillRect(0, 0, W, H);
+
+    const step = hitungStep(maxVal);
+    const fs   = Math.max(10, W * 0.017);
+
+    // Grid lines
+    ctx.strokeStyle = "#e2e8f0";
+    ctx.lineWidth   = 1;
+    for (let v = 0; v <= maxVal + step; v += step) {
+      const gx = ox + v * scale;
+      if (gx <= ox + gW + 2) {
+        ctx.beginPath(); ctx.moveTo(gx, pad.top); ctx.lineTo(gx, oy); ctx.stroke();
+      }
+      const gy = oy - v * scale;
+      if (gy >= pad.top - 2) {
+        ctx.beginPath(); ctx.moveTo(ox, gy); ctx.lineTo(ox + gW, gy); ctx.stroke();
+      }
+    }
+
+    // Tick labels
+    ctx.font      = `${fs}px Segoe UI`;
+    ctx.fillStyle = "#94a3b8";
+    ctx.textAlign = "center";
+    for (let v = step; v <= maxVal; v += step) {
+      const gx = ox + v * scale;
+      if (gx <= ox + gW + 2) ctx.fillText(v+"W", gx, oy + 18);
+      const gy = oy - v * scale;
+      if (gy >= pad.top - 2) {
+        ctx.textAlign = "right";
+        ctx.fillText(v+"W", ox - 6, gy + 4);
+        ctx.textAlign = "center";
+      }
+    }
+
+    // Sumbu X
+    ctx.strokeStyle = "#334155"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ox + gW + 12, oy); ctx.stroke();
+    kepalaPanah(ox + gW + 12, oy, 0, "#334155");
+
+    // Sumbu Y
+    ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ox, pad.top - 12); ctx.stroke();
+    kepalaPanah(ox, pad.top - 12, -Math.PI/2, "#334155");
+
+    // Label sumbu
+    const fsL = Math.max(11, W * 0.019);
+    ctx.font = `600 ${fsL}px Segoe UI`;
+    ctx.fillStyle = "#475569"; ctx.textAlign = "center";
+    ctx.fillText("Komponen X — Alat Ringan ≤100W (Watt)", ox + gW/2, oy + 36);
+    ctx.save();
+    ctx.translate(ox - 42, oy - gH/2);
+    ctx.rotate(-Math.PI/2);
+    ctx.fillText("Komponen Y — Alat Berat >100W (Watt)", 0, 0);
+    ctx.restore();
+
+    // Origin
+    ctx.fillStyle = "#94a3b8"; ctx.font = `${fs}px Segoe UI`; ctx.textAlign = "right";
+    ctx.fillText("O(0,0)", ox - 5, oy + 16);
+  }
+
+  // Animasi
+  if (vektorAnimFrame) cancelAnimationFrame(vektorAnimFrame);
+  const DX=700, DY=700, DR=800, JEDA=250, TOTAL=DX+JEDA+DY+JEDA+DR;
+  let startTime = null;
+
+  function easeOut(t) { return 1 - Math.pow(1-t, 3); }
+
+  function animate(ts) {
+    if (!startTime) startTime = ts;
+    const el = ts - startTime;
+
+    gambarGrid();
+
+    const fs = Math.max(11, W * 0.018);
+    ctx.font = `600 ${fs}px Segoe UI`;
+
+    // Fase X
+    const tX = Math.min(el / DX, 1);
+    if (tX > 0 && ringan > 0) {
+      const curX = ox + ringan * scale * easeOut(tX);
+      ctx.strokeStyle = "#22c55e"; ctx.fillStyle = "#22c55e";
+      ctx.lineWidth = Math.max(3, W * 0.005);
+      ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(curX, oy); ctx.stroke();
+      kepalaPanah(curX, oy, 0, "#22c55e");
+      if (tX >= 1) {
+        ctx.textAlign = "center";
+        ctx.fillText(`X = ${ringan} W`, (ox+px)/2, oy - 14);
+      }
+    }
+
+    // Fase Y
+    const startY = DX + JEDA;
+    if (el > startY && sedang > 0) {
+      const tY   = Math.min((el - startY) / DY, 1);
+      const curY = oy - sedang * scale * easeOut(tY);
+      ctx.strokeStyle = "#f59e0b"; ctx.fillStyle = "#f59e0b";
+      ctx.lineWidth = Math.max(3, W * 0.005);
+      ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ox, curY); ctx.stroke();
+      kepalaPanah(ox, curY, -Math.PI/2, "#f59e0b");
+      if (tY >= 1) {
+        ctx.textAlign = "left";
+        ctx.fillText(`Y = ${sedang} W`, ox + 10, (oy+py)/2);
+      }
+    }
+
+    // Fase R
+    const startR = startY + DY + JEDA;
+    if (el > startR && R > 0) {
+      const tR   = Math.min((el - startR) / DR, 1);
+      const curPx = ox + (px - ox) * easeOut(tR);
+      const curPy = oy + (py - oy) * easeOut(tR);
+      ctx.strokeStyle = "#3d5afe"; ctx.fillStyle = "#3d5afe";
+      ctx.lineWidth = Math.max(3, W * 0.006);
+      ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(curPx, curPy); ctx.stroke();
+      kepalaPanah(curPx, curPy, Math.atan2(py-oy, px-ox), "#3d5afe");
+
+      if (tR >= 1) {
+        // Label R
+        const fsB = Math.max(12, W * 0.02);
+        ctx.font = `700 ${fsB}px Segoe UI`;
+        ctx.fillStyle = "#1d4ed8"; ctx.textAlign = "left";
+        ctx.fillText(`|R| = ${R.toFixed(1)} W`, (ox+px)/2 + 8, (oy+py)/2 - 12);
+
+        // Arc sudut θ
+        if (ringan > 0 && sedang > 0) {
+          const arcR = Math.min(gW, gH) * 0.14;
+          ctx.beginPath();
+          ctx.arc(ox, oy, arcR, -theta, 0, true);
+          ctx.strokeStyle = "#a78bfa"; ctx.lineWidth = 2;
+          ctx.setLineDash([4,3]); ctx.stroke(); ctx.setLineDash([]);
+          ctx.font = `600 ${Math.max(11, W*0.018)}px Segoe UI`;
+          ctx.fillStyle = "#7c3aed"; ctx.textAlign = "left";
+          ctx.fillText(`θ=${thetaDeg}°`, ox + arcR + 6, oy - arcR * 0.35);
+        }
+
+        // Titik ujung + koordinat
+        ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI*2);
+        ctx.fillStyle = "#3d5afe"; ctx.fill();
+        ctx.font = `${Math.max(11,W*0.017)}px Segoe UI`;
+        ctx.fillStyle = "#1e40af"; ctx.textAlign = "left";
+        ctx.fillText(`(${ringan}, ${sedang})`, px+8, py-8);
+      }
+    }
+
+    if (el < TOTAL) vektorAnimFrame = requestAnimationFrame(animate);
+  }
+
+  vektorAnimFrame = requestAnimationFrame(animate);
+
+  // Update rumus
+  document.getElementById("rumus-magnitude").innerText =
+    `|R| = √(${ringan}² + ${sedang}²) = √${ringan**2+sedang**2} = ${R.toFixed(4)} W`;
+  document.getElementById("rumus-sudut").innerText =
+    ringan > 0 ? `θ = arctan(${sedang}/${ringan}) = ${thetaDeg}°` : `θ = 90° (tidak ada komponen X)`;
+  document.getElementById("rumus-unit").innerText = `R̂ = ${ux}î + ${uy}ĵ`;
+  document.getElementById("rumus-vektor").innerText = `R = ${ringan}î + ${sedang}ĵ  (Watt)`;
+
+  // Update output angka
   document.getElementById("vektor-output").innerHTML = `
-    🟢 Komponen X (Alat Ringan ≤100W): <b>${ringan} W</b><br>
-    🟡 Komponen Y (Alat Sedang/Berat >100W): <b>${sedang} W</b><br>
-    🔵 Vektor Resultan Total: <b>${R.toFixed(1)} W</b>
+    <span>🟢 Komponen X: <b>${ringan} W</b></span>
+    <span>🔵 Resultan |R|: <b>${R.toFixed(2)} W</b></span>
+    <span>🟡 Komponen Y: <b>${sedang} W</b></span>
+    <span>📐 Sudut θ: <b>${thetaDeg}°</b></span>
   `;
-}
 
-function drawArrow(ctx, x1, y1, x2, y2, color, W) {
-  const headSize = Math.max(8, W * 0.016);
-  ctx.strokeStyle = color;
-  ctx.fillStyle   = color;
-  ctx.lineWidth   = Math.max(2, W * 0.005);
-
-  ctx.beginPath();
-  ctx.moveTo(x1, y1);
-  ctx.lineTo(x2, y2);
-  ctx.stroke();
-
-  const angle = Math.atan2(y2 - y1, x2 - x1);
-  ctx.beginPath();
-  ctx.moveTo(x2, y2);
-  ctx.lineTo(x2 - headSize * Math.cos(angle - 0.4), y2 - headSize * Math.sin(angle - 0.4));
-  ctx.lineTo(x2 - headSize * Math.cos(angle + 0.4), y2 - headSize * Math.sin(angle + 0.4));
-  ctx.closePath();
-  ctx.fill();
+  // Step-by-step
+  const lR = detailRingan.length ? detailRingan.map(r=>`${r.nama}(${r.watt}W)`).join(", ") : "—";
+  const lS = detailSedang.length ? detailSedang.map(r=>`${r.nama}(${r.watt}W)`).join(", ") : "—";
+  document.getElementById("edukasi-steps").innerHTML = `
+    <div class="step-item">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <div class="step-title">Identifikasi Komponen Vektor</div>
+        <div class="step-detail">Setiap alat listrik dimodelkan sebagai vektor daya. Alat ≤100W → <b>komponen X</b>, alat >100W → <b>komponen Y</b>.</div>
+        <div class="step-result">X: ${lR}<br>Y: ${lS}</div>
+      </div>
+    </div>
+    <div class="step-item">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <div class="step-title">Hitung Besar Tiap Komponen</div>
+        <div class="step-detail">Jumlahkan semua daya pada masing-masing sumbu:</div>
+        <div class="step-result">
+          X = ${detailRingan.map(r=>r.watt).join(" + ")||"0"} = <b>${ringan} W</b><br>
+          Y = ${detailSedang.map(r=>r.watt).join(" + ")||"0"} = <b>${sedang} W</b>
+        </div>
+      </div>
+    </div>
+    <div class="step-item">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <div class="step-title">Hitung Magnitude Resultan (Teorema Pythagoras)</div>
+        <div class="step-detail">Besar vektor resultan dihitung dari panjang diagonal jajargenjang komponen:</div>
+        <div class="step-result">
+          |R| = √(X² + Y²)<br>
+          |R| = √(${ringan}² + ${sedang}²)<br>
+          |R| = √(${ringan**2} + ${sedang**2})<br>
+          |R| = √${ringan**2+sedang**2} = <b>${R.toFixed(4)} W</b>
+        </div>
+      </div>
+    </div>
+    <div class="step-item">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <div class="step-title">Hitung Sudut Resultan (θ)</div>
+        <div class="step-detail">Sudut terhadap sumbu X dihitung menggunakan fungsi arctangent:</div>
+        <div class="step-result">
+          θ = arctan(Y / X) = arctan(${sedang} / ${ringan||1})<br>
+          θ = <b>${thetaDeg}°</b>
+        </div>
+      </div>
+    </div>
+    <div class="step-item">
+      <div class="step-num">5</div>
+      <div class="step-body">
+        <div class="step-title">Hitung Unit Vektor (R̂)</div>
+        <div class="step-detail">Unit vektor menunjukkan arah resultan dengan magnitude = 1 (vektor satuan):</div>
+        <div class="step-result">
+          R̂ = (X/|R|)î + (Y/|R|)ĵ<br>
+          R̂ = (${ringan}/${R.toFixed(2)})î + (${sedang}/${R.toFixed(2)})ĵ<br>
+          R̂ = <b>${ux}î + ${uy}ĵ</b>
+        </div>
+      </div>
+    </div>
+    <div class="step-item">
+      <div class="step-num">6</div>
+      <div class="step-body">
+        <div class="step-title">Interpretasi Fisika</div>
+        <div class="step-detail">
+          Vektor resultan R merepresentasikan total beban listrik rumah secara matematis:<br>
+          • Besar resultan: <b>${R.toFixed(2)} W</b><br>
+          • Sudut θ = ${thetaDeg}° — menunjukkan proporsi beban berat vs ringan<br>
+          • Dominasi: ${sedang > ringan ? "<b>alat berdaya besar</b> mendominasi konsumsi" : "<b>alat berdaya kecil</b> mendominasi konsumsi"}
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 /* ==================================================
