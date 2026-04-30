@@ -1,22 +1,27 @@
-/* ==================================================
-   ENERGISCAN PREMIUM - FINAL SCRIPT
-   - Fix path maskot: "maskot/" bukan "assets/"
-   - Fix nama file: remap mode ke file yang ada
-   - Fix canvas vektor: responsive + normalisasi
-   - Fix hapusAlat: pakai closest()
-   - Fix hari: dinamis bukan hardcode 30
-   - Restore: slider simulasi, tips kontekstual,
-              peringatan kombinasi berbahaya
-================================================== */
+/* =====================================================
+   ENERGISCAN — SCRIPT UTAMA
+   Semua logika interaktif ada di sini: kalkulasi,
+   navigasi, render canvas vektor, tips hemat, dll.
+====================================================== */
 
-let currentTarif = 0;
-let currentVA    = 0;
-let myChart      = null;
-let lastResults  = [];
 
-/* ==================================================
-   PRESET ALAT
-================================================== */
+/* =====================================================
+   VARIABEL GLOBAL
+   Disimpan di luar fungsi biar bisa diakses semua
+   fungsi tanpa harus dioper-oper terus lewat parameter.
+====================================================== */
+let currentTarif = 0;    // tarif Rp/kWh sesuai golongan VA yang dipilih
+let currentVA    = 0;    // batas daya VA rumah (untuk cek status overload)
+let myChart      = null; // simpan referensi chart biar bisa di-destroy sebelum dibuat ulang
+let lastResults  = [];   // array hasil kalkulasi: [{nama, watt, jam, kwh}, ...]
+
+
+/* =====================================================
+   DATA PRESET ALAT RUMAH
+   Daftar alat + estimasi watt-nya. Ini yang jadi
+   sumber tombol-tombol preset di halaman input.
+   Kalau mau tambah alat baru, tinggal tambah di sini.
+====================================================== */
 const PRESETS = [
   { nama: "Lampu LED",    watt: 10  },
   { nama: "Kipas Angin",  watt: 50  },
@@ -30,9 +35,14 @@ const PRESETS = [
   { nama: "AC 1 PK",      watt: 800 },
 ];
 
-/* ==================================================
-   TIPS KONTEKSTUAL (hanya tampil jika alat ada di list)
-================================================== */
+
+/* =====================================================
+   DATABASE TIPS KONTEKSTUAL
+   Tips di sini hanya ditampilkan kalau alat yang
+   relevan ada di list user. Caranya: cocokkan nama
+   alat yang diinput user dengan keywords di tiap entry.
+   Kalau tidak ada yang cocok, pakai TIPS_UMUM sebagai fallback.
+====================================================== */
 const TIPS_KONTEKSTUAL = [
   { keywords: ['ac', 'air conditioner', 'pendingin'],
     tips: [
@@ -79,15 +89,23 @@ const TIPS_KONTEKSTUAL = [
     ]},
 ];
 
+/* Tips cadangan kalau tidak ada alat yang cocok dengan keywords di atas */
 const TIPS_UMUM = [
   "Cabut charger dan adaptor saat tidak digunakan — standby power bisa menyedot hingga 10% tagihan.",
   "Gunakan stopkontak bersaklar agar mudah memutus daya beberapa perangkat sekaligus.",
   "Cek label hemat energi saat beli alat baru — pilih rating bintang lebih tinggi.",
 ];
 
-/* ==================================================
-   DATABASE KOMBINASI BERBAHAYA
-================================================== */
+
+/* =====================================================
+   DATABASE ALAT BERAT & KOMBINASI BERBAHAYA
+   ALAT_BERAT: daftar alat yang daya-nya besar,
+   lengkap dengan keyword pengenal dan id unik.
+
+   KOMBINASI_BAHAYA: pasangan alat yang tidak disarankan
+   dipakai bersamaan karena bisa trip MCB.
+   Level "merah" lebih serius dari "kuning".
+====================================================== */
 const ALAT_BERAT = [
   { id: 'ac',       keywords: ['ac ',  'air conditioner', 'pendingin'],        label: 'AC'            },
   { id: 'setrika',  keywords: ['setrika'],                                      label: 'Setrika'       },
@@ -119,11 +137,14 @@ const KOMBINASI_BAHAYA = [
     pesan: 'Kompor listrik dan setrika adalah dua beban terbesar. Jangan nyalakan bersamaan.' },
 ];
 
-/* ==================================================
-   MASKOT VECTO
-   Mode yang tersedia (sesuai file di folder maskot/):
-   happy, shock, confused, smart, sleepy, energy
-================================================== */
+
+/* =====================================================
+   MASKOT VECTO — EKSPRESI DINAMIS
+   MASKOT_MAP menghubungkan nama mode ke nama file.
+   Kalau nama file berubah, cukup update di sini.
+   Fungsi gantiVecto() ganti src gambar maskot,
+   tampilkanVecto() sekaligus buka popupnya.
+====================================================== */
 const MASKOT_PATH = "maskot/";
 
 const MASKOT_MAP = {
@@ -135,6 +156,7 @@ const MASKOT_MAP = {
   energy:   "vecto-energy.png",
 };
 
+/* Ganti gambar maskot sesuai mode — fallback ke "happy" kalau mode tidak dikenal */
 function gantiVecto(mode = "happy") {
   const img = document.getElementById("vecto-img");
   if (!img) return;
@@ -142,6 +164,7 @@ function gantiVecto(mode = "happy") {
   img.src = MASKOT_PATH + file;
 }
 
+/* Isi teks popup dan buka sekaligus — dipanggil dari berbagai kondisi */
 function tampilkanVecto(judul, pesan, mode = "happy") {
   document.getElementById("v-title").innerText = judul;
   document.getElementById("v-msg").innerText   = pesan;
@@ -149,21 +172,29 @@ function tampilkanVecto(judul, pesan, mode = "happy") {
   document.getElementById("vecto-popup").classList.remove("hidden");
 }
 
+/* Tutup popup dengan tambahkan class "hidden" */
 function tutupPopup() {
   document.getElementById("vecto-popup").classList.add("hidden");
 }
 
-/* ==================================================
-   NAVIGASI
-================================================== */
+
+/* =====================================================
+   NAVIGASI ANTAR HALAMAN
+   Cara kerjanya simpel: hapus class "active" dari
+   semua section, terus kasih ke section yang dituju.
+   CSS yang urus apakah ditampilkan atau tidak.
+====================================================== */
 function navigasi(id) {
   document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
   document.getElementById(id).classList.add("active");
 }
 
-/* ==================================================
-   INISIALISASI
-================================================== */
+
+/* =====================================================
+   INISIALISASI — DIJALANKAN SAAT HALAMAN SELESAI LOAD
+   Urutan: render preset dulu, tambah satu baris alat
+   kosong otomatis, lalu tampilkan popup sambutan.
+====================================================== */
 window.onload = () => {
   renderPresets();
   tambahAlat();
@@ -174,16 +205,22 @@ window.onload = () => {
   );
 };
 
-/* ==================================================
-   PILIH DAYA VA
-================================================== */
+
+/* =====================================================
+   EVENT: PILIH GOLONGAN VA
+   Dijalankan setiap kali user ganti pilihan select.
+   Ambil tarif dari value option dan VA dari data-va,
+   simpan ke variabel global, lalu update panel info.
+====================================================== */
 document.getElementById("select-va").addEventListener("change", function () {
   const opt     = this.options[this.selectedIndex];
-  currentTarif  = parseInt(this.value);
-  currentVA     = parseInt(opt.dataset.va);
+  currentTarif  = parseInt(this.value);        // tarif Rp/kWh
+  currentVA     = parseInt(opt.dataset.va);    // batas VA rumah
 
+  // Aktifkan tombol "Lanjut" setelah user pilih VA
   document.getElementById("btn-next").disabled = false;
 
+  // Update panel info di sebelah kanan dengan data yang baru dipilih
   document.getElementById("info-tarif").innerHTML = `
     <h3>💡 Informasi Tarif</h3>
     <p>Daya Rumah: <b>${currentVA} VA</b></p>
@@ -193,6 +230,7 @@ document.getElementById("select-va").addEventListener("change", function () {
     </p>
   `;
 
+  // Tampilkan popup Vecto dengan info daya yang dipilih
   tampilkanVecto(
     "Daya Berhasil Dipilih ⚡",
     `Rumahmu memakai daya ${currentVA} VA dengan tarif Rp ${currentTarif.toLocaleString("id-ID")}/kWh.`,
@@ -200,9 +238,13 @@ document.getElementById("select-va").addEventListener("change", function () {
   );
 });
 
-/* ==================================================
-   RENDER PRESET
-================================================== */
+
+/* =====================================================
+   RENDER TOMBOL PRESET
+   Loop array PRESETS dan buat button untuk masing-masing.
+   Waktu diklik, langsung panggil tambahAlat() dengan
+   nama dan watt dari preset yang dipilih.
+====================================================== */
 function renderPresets() {
   const wrap = document.getElementById("preset-grid");
   wrap.innerHTML = "";
@@ -215,41 +257,61 @@ function renderPresets() {
   });
 }
 
-/* ==================================================
-   TAMBAH / HAPUS ALAT
-================================================== */
+
+/* =====================================================
+   TAMBAH / HAPUS BARIS ALAT
+   tambahAlat() buat elemen DOM baru berupa form baris alat.
+   Kalau dipanggil dari preset, nama dan watt sudah terisi.
+   Kalau dipanggil manual, keduanya kosong.
+
+   hapusAlat() pakai .closest() biar tidak rapuh —
+   tidak bergantung pada struktur DOM yang spesifik.
+====================================================== */
 function tambahAlat(nama = "", watt = "") {
   const wrap = document.getElementById("list-alat");
   const row  = document.createElement("div");
   row.className = "glass-card alat-row no-hover";
   row.innerHTML = `
     <div class="alat-top">
-      <input type="text"   class="modern-input n" placeholder="Nama alat" value="${nama}" oninput="updateKontekstualWarning()">
+      <!-- oninput langsung cek kombinasi berbahaya setiap kali nama diketik -->
+      <input type="text" class="modern-input n" placeholder="Nama alat" value="${nama}" oninput="updateKontekstualWarning()">
       <button class="btn-hapus" onclick="hapusAlat(this)">✕</button>
     </div>
     <div class="alat-bottom">
+      <!-- oninput juga update warning saat watt diisi -->
       <input type="number" class="modern-input w" placeholder="Watt" min="0" value="${watt}" oninput="updateKontekstualWarning()">
       <input type="number" class="modern-input j" placeholder="Jam / hari" min="0" max="24">
     </div>
   `;
   wrap.appendChild(row);
+  // Cek ulang warning setiap baris baru ditambahkan
   updateKontekstualWarning();
 }
 
+/* Hapus baris alat dan langsung update warning */
 function hapusAlat(btn) {
   btn.closest(".alat-row").remove();
   updateKontekstualWarning();
 }
 
+/* Hubungkan tombol "Tambah Alat Manual" ke fungsi tambahAlat */
 document.getElementById("add-item").onclick = () => tambahAlat();
 
-/* ==================================================
-   PERINGATAN KONTEKSTUAL
-================================================== */
+
+/* =====================================================
+   CEK & TAMPILKAN PERINGATAN KOMBINASI BERBAHAYA
+   Fungsi ini dipanggil setiap kali ada perubahan input.
+   Alurnya:
+   1. Kumpulkan semua nama alat yang sudah diisi watt-nya
+   2. Cocokkan dengan ALAT_BERAT untuk identifikasi alat berat
+   3. Cek apakah ada pasangan di KOMBINASI_BAHAYA yang match
+   4. Kalau ada 3+ alat berat tapi belum ada yang merah, tambah warning kuning
+   5. Tampilkan yang paling serius duluan (merah > kuning)
+====================================================== */
 function updateKontekstualWarning() {
   const card = document.getElementById("warning-beban");
 
-  // Kumpulkan nama alat yang sudah diisi watt-nya
+  // Kumpulkan nama alat yang sudah diisi watt-nya (keduanya tidak boleh kosong)
   const namaAlat = [];
   document.querySelectorAll("#list-alat .alat-row").forEach(item => {
     const n = (item.querySelector(".n").value || "").toLowerCase().trim();
@@ -257,14 +319,15 @@ function updateKontekstualWarning() {
     if (n && w > 0) namaAlat.push(n);
   });
 
+  // Kalau tidak ada alat, sembunyikan warning dan keluar
   if (namaAlat.length === 0) { card.style.display = "none"; return; }
 
-  // Identifikasi alat berat yang ada
+  // Filter alat-alat berat yang keywords-nya cocok dengan nama yang diinput
   const alatBeratDitemukan = ALAT_BERAT.filter(ab =>
     namaAlat.some(n => ab.keywords.some(k => n.includes(k)))
   );
 
-  // Cari kombinasi berbahaya
+  // Cek setiap kombinasi bahaya — masukkan ke array kalau semua anggota combo ada
   const peringatan = [];
   KOMBINASI_BAHAYA.forEach(kb => {
     if (kb.combo.every(id => alatBeratDitemukan.some(ab => ab.id === id))) {
@@ -272,7 +335,7 @@ function updateKontekstualWarning() {
     }
   });
 
-  // Jika ada 3+ alat berat tanpa kombinasi merah
+  // Kalau ada 3+ alat berat tapi belum ada peringatan merah, tambah warning kuning generik
   if (alatBeratDitemukan.length >= 3 && !peringatan.some(p => p.level === "merah")) {
     peringatan.push({
       level: "kuning",
@@ -281,12 +344,14 @@ function updateKontekstualWarning() {
     });
   }
 
+  // Tidak ada peringatan sama sekali — sembunyikan card dan selesai
   if (peringatan.length === 0) { card.style.display = "none"; return; }
 
-  // Tampilkan level tertinggi (merah > kuning)
+  // Urutkan: merah duluan, baru kuning
   peringatan.sort((a, b) => (a.level === "merah" ? -1 : 1));
   const dominan = peringatan[0];
 
+  // Tampilkan semua peringatan yang aktif dalam satu card
   card.className    = `warning-beban-card level-${dominan.level}`;
   card.style.display = "block";
   card.innerHTML = `
@@ -299,24 +364,32 @@ function updateKontekstualWarning() {
   `;
 }
 
-/* ==================================================
-   PROSES DATA
-================================================== */
+
+/* =====================================================
+   PROSES DATA & KALKULASI UTAMA
+   Dipanggil waktu user klik "Hitung Sekarang".
+   Pakai setTimeout 80ms biar browser sempat render
+   tombol loading dulu sebelum kalkulasi jalan.
+
+   Rumus: E (kWh) = P (Watt) × t (jam) × hari / 1000
+   Hari dihitung dinamis dari tanggal sekarang —
+   tidak hardcode 30 biar Februari tidak salah hitung.
+====================================================== */
 function prosesData() {
-  const rows    = document.querySelectorAll(".alat-row");
+  const rows      = document.querySelectorAll(".alat-row");
   const btnHitung = document.getElementById("btn-hitung");
 
-  // Loading state
+  // Ubah tombol jadi loading state dulu biar user tahu kalkulasi sedang jalan
   btnHitung.innerText  = "Menghitung... ⏳";
   btnHitung.disabled   = true;
 
-  // Beri sedikit jeda agar browser render loading state dulu
   setTimeout(() => {
     let totalKwh = 0;
     const labels = [], values = [];
     lastResults  = [];
     let adaError = false;
 
+    // Hitung jumlah hari di bulan ini secara dinamis (bukan hardcode 30)
     const hariSebulan = new Date(
       new Date().getFullYear(),
       new Date().getMonth() + 1,
@@ -328,19 +401,20 @@ function prosesData() {
       const wattRaw = parseFloat(row.querySelector(".w").value);
       const jamRaw  = parseFloat(row.querySelector(".j").value);
 
-      // Validasi ketat: harus positif, jam 0–24
-      const watt = (!isNaN(wattRaw) && wattRaw > 0)   ? wattRaw  : 0;
-      const jam  = (!isNaN(jamRaw)  && jamRaw  > 0 && jamRaw <= 24) ? jamRaw : 0;
+      // Validasi: nilai harus positif dan jam tidak boleh lebih dari 24
+      const watt = (!isNaN(wattRaw) && wattRaw > 0)                    ? wattRaw : 0;
+      const jam  = (!isNaN(jamRaw)  && jamRaw  > 0 && jamRaw <= 24)    ? jamRaw  : 0;
 
-      // Highlight input yang salah
+      // Highlight input yang nilainya tidak valid dengan border merah
       const wInput = row.querySelector(".w");
       const jInput = row.querySelector(".j");
-
       wInput.style.borderColor = (wattRaw > 0 || isNaN(wattRaw)) ? "" : "#ef4444";
       jInput.style.borderColor = (jamRaw > 0 && jamRaw <= 24) || isNaN(jamRaw) ? "" : "#ef4444";
 
+      // Tandai ada error kalau jam melebihi 24
       if (!isNaN(jamRaw) && jamRaw > 24) adaError = true;
 
+      // Hitung kWh hanya kalau kedua nilai valid
       if (watt > 0 && jam > 0) {
         const kwh = (watt * jam * hariSebulan) / 1000;
         totalKwh += kwh;
@@ -350,10 +424,11 @@ function prosesData() {
       }
     });
 
-    // Reset button
+    // Kembalikan tombol ke kondisi normal
     btnHitung.innerText = "Hitung Sekarang ➔";
     btnHitung.disabled  = false;
 
+    // Kalau ada jam > 24, hentikan dan tampilkan pesan error
     if (adaError) {
       tampilkanVecto(
         "Jam Tidak Valid ⏰",
@@ -363,6 +438,7 @@ function prosesData() {
       return;
     }
 
+    // Kalau tidak ada data yang valid sama sekali, hentikan juga
     if (totalKwh <= 0) {
       tampilkanVecto(
         "Data Belum Lengkap 😅",
@@ -372,21 +448,25 @@ function prosesData() {
       return;
     }
 
+    // Hitung tagihan dan tampilkan ke kartu hasil
     const totalRp = totalKwh * currentTarif;
     document.getElementById("out-kwh").innerText = totalKwh.toFixed(1) + " kWh";
     document.getElementById("out-rp").innerText  = "Rp " + totalRp.toLocaleString("id-ID");
 
+    // Pindah ke halaman hasil
     navigasi("p-result");
 
+    // Isi semua bagian halaman hasil
     updateChart(labels, values);
     updateTips(totalKwh);
     updateSimulasi();
     updateInfoTambahan(totalKwh);
 
-    // setTimeout agar canvas sudah ter-render dan offsetWidth benar
+    // Canvas vektor perlu setTimeout — tunggu sampai canvas benar-benar ter-render
+    // biar offsetWidth terbaca dengan benar (tidak 0)
     setTimeout(() => gambarVektor(), 120);
 
-    // Smart Diagnosis
+    // Smart Diagnosis: cek apakah ada satu alat yang menyumbang >40% konsumsi
     const biang = lastResults.find(r => (r.kwh / totalKwh) > 0.4);
     if (biang) {
       tampilkanVecto(
@@ -410,12 +490,17 @@ function prosesData() {
   }, 80);
 }
 
-/* ==================================================
-   CHART
-================================================== */
+
+/* =====================================================
+   UPDATE GRAFIK DONAT (CHART.JS)
+   Destroy dulu chart lama sebelum buat yang baru —
+   kalau tidak, chart lama masih ada di memori
+   dan bisa bikin glitch atau memory leak.
+   12 warna disiapkan buat antisipasi banyak alat.
+====================================================== */
 function updateChart(labels, values) {
   const ctx = document.getElementById("myChart");
-  if (myChart) myChart.destroy();
+  if (myChart) myChart.destroy(); // hapus chart sebelumnya dulu
   myChart = new Chart(ctx, {
     type: "doughnut",
     data: {
@@ -436,21 +521,31 @@ function updateChart(labels, values) {
   });
 }
 
-/* ==================================================
-   TIPS KONTEKSTUAL
-================================================== */
+
+/* =====================================================
+   UPDATE PANEL TIPS HEMAT (KONTEKSTUAL)
+   Cocokkan nama alat user dengan keywords di database.
+   Kumpulkan semua tips yang relevan, pilih satu acak.
+   Kalau tidak ada yang cocok, ambil dari TIPS_UMUM.
+   Plus: kalau ada biang boros >40%, tambahkan saran khusus.
+====================================================== */
 function updateTips(totalKwh) {
+  // Ambil nama semua alat dalam lowercase buat pencocokan
   const namaUser = lastResults.map(r => r.nama.toLowerCase());
 
+  // Kumpulkan semua tips yang keyword-nya cocok dengan alat user
   let tipsRelevan = [];
   TIPS_KONTEKSTUAL.forEach(entry => {
     const cocok = namaUser.some(n => entry.keywords.some(k => n.includes(k)));
     if (cocok) tipsRelevan.push(...entry.tips);
   });
+  // Fallback ke tips umum kalau tidak ada yang relevan
   if (tipsRelevan.length === 0) tipsRelevan = [...TIPS_UMUM];
 
+  // Pilih satu tips secara acak dari yang relevan
   const tipTerpilih = tipsRelevan[Math.floor(Math.random() * tipsRelevan.length)];
 
+  // Kalau ada alat biang boros (>40% total), tambahkan saran spesifik di bawahnya
   const biang = lastResults.find(r => (r.kwh / totalKwh) > 0.4);
   const saranBiang = biang
     ? `<p style="margin-top:12px; padding-top:12px; border-top:1px solid #bfdbfe;">
@@ -467,24 +562,32 @@ function updateTips(totalKwh) {
   `;
 }
 
-/* ==================================================
-   INFO TAMBAHAN
-================================================== */
+
+/* =====================================================
+   UPDATE INFO TAMBAHAN (3 KARTU BAWAH)
+   Isi kartu Profil Rumah, Fakta Energi, dan Rekomendasi.
+   Kontennya dinamis berdasarkan data kalkulasi user —
+   bukan teks statis yang sama untuk semua orang.
+====================================================== */
 function updateInfoTambahan(totalKwh) {
+  // Jumlah total watt semua alat (tanpa dikalikan jam)
   let totalWatt = lastResults.reduce((sum, r) => sum + r.watt, 0);
 
-  let status  = "✅ Aman";
+  // Tentukan status beban berdasarkan perbandingan total watt vs batas VA
+  let status   = "✅ Aman";
   let ekspresi = "happy";
   if (totalWatt > currentVA) {
-    status   = "🔴 Overload";
+    status   = "🔴 Overload";       // total watt melebihi VA — bahaya
     ekspresi = "shock";
   } else if (totalWatt > currentVA * 0.8) {
-    status   = "🟡 Mendekati Batas";
+    status   = "🟡 Mendekati Batas"; // lebih dari 80% VA — hati-hati
     ekspresi = "confused";
   }
 
+  // Ganti ekspresi maskot sesuai status beban
   gantiVecto(ekspresi);
 
+  // Isi kartu Profil Rumah
   document.getElementById("profil-rumah").innerHTML = `
     <div class="info-line">Daya Rumah: <b>${currentVA} VA</b></div>
     <div class="info-line">Total Beban: <b>${totalWatt} W</b></div>
@@ -492,10 +595,11 @@ function updateInfoTambahan(totalKwh) {
     <div class="info-line">Tarif: <b>Rp ${currentTarif.toLocaleString("id-ID")}/kWh</b></div>
   `;
 
-  // Fakta energi disesuaikan dengan alat yang diinput
+  // Cek apakah user punya AC atau lampu LED — biar fakta yang ditampilkan relevan
   const namaUser = lastResults.map(r => r.nama.toLowerCase());
   const adaAC    = namaUser.some(n => n.includes("ac") || n.includes("pendingin"));
   const adaLED   = namaUser.some(n => n.includes("lampu") || n.includes("led"));
+
   const faktaList = [
     "1 kWh = menggunakan 1000 watt selama 1 jam penuh.",
     adaAC  ? "AC adalah salah satu alat paling boros — pertimbangkan timer." : "Gunakan alat berdaya rendah untuk aktivitas ringan.",
@@ -504,7 +608,7 @@ function updateInfoTambahan(totalKwh) {
   document.getElementById("fakta-energi").innerHTML =
     faktaList.map(f => `<div class="info-line">${f}</div>`).join("");
 
-  // Rekomendasi berdasarkan data nyata
+  // Isi kartu Rekomendasi: cari alat yang konsumsinya paling besar
   const paling_boros = [...lastResults].sort((a, b) => b.kwh - a.kwh)[0];
   document.getElementById("ai-analisa").innerHTML = `
     <div class="info-line">
@@ -515,25 +619,38 @@ function updateInfoTambahan(totalKwh) {
   `;
 }
 
-/* ==================================================
-   VISUALISASI VEKTOR — FULL UPGRADE
-   Grid kartesian proper + animasi sequential +
-   rumus matematis + edukasi step-by-step
-================================================== */
 
-let vektorAnimFrame = null;
+/* =====================================================
+   VISUALISASI VEKTOR — CANVAS 2D
+   Ini bagian paling kompleks di seluruh script.
+   Gambar diagram vektor kartesian dari nol pakai
+   Canvas API — tidak pakai library sama sekali.
 
+   Alur kerja:
+   1. Baca lebar canvas aktual (bukan hardcode) buat responsif
+   2. Pisahkan alat ringan (≤100W) → sumbu X
+      dan alat berat (>100W) → sumbu Y
+   3. Hitung semua nilai matematika (|R|, θ, unit vektor)
+   4. Gambar grid kartesian dengan tick marks
+   5. Animasi sequential: X muncul dulu → lalu Y → lalu R
+   6. Update panel rumus dan langkah edukasi
+====================================================== */
+let vektorAnimFrame = null; // simpan ID animasi biar bisa di-cancel waktu replay
+
+/* Tombol "Putar Ulang" tinggal panggil ulang gambarVektor() */
 function replayVektor() { gambarVektor(); }
 
 function gambarVektor() {
   const canvas = document.getElementById("vectorCanvas");
   const ctx    = canvas.getContext("2d");
 
+  // Baca lebar aktual canvas — jangan hardcode, biar pas di semua ukuran layar
   const W = canvas.offsetWidth || 680;
-  const H = Math.round(W * 0.62);
+  const H = Math.round(W * 0.62);   // rasio tinggi 62% dari lebar
   canvas.width  = W;
   canvas.height = H;
 
+  // Pisahkan alat: ≤100W jadi komponen X, >100W jadi komponen Y
   let ringan = 0, sedang = 0;
   const detailRingan = [], detailSedang = [];
   lastResults.forEach(r => {
@@ -541,32 +658,37 @@ function gambarVektor() {
     else               { sedang += r.watt; detailSedang.push(r); }
   });
 
-  const R        = Math.sqrt(ringan ** 2 + sedang ** 2);
-  const theta    = ringan > 0 ? Math.atan2(sedang, ringan) : Math.PI / 2;
+  // Hitung semua nilai matematika yang dibutuhkan
+  const R        = Math.sqrt(ringan ** 2 + sedang ** 2);            // |R| = √(X²+Y²)
+  const theta    = ringan > 0 ? Math.atan2(sedang, ringan) : Math.PI / 2;  // θ = arctan(Y/X)
   const thetaDeg = (theta * 180 / Math.PI).toFixed(2);
-  const ux       = R > 0 ? (ringan / R).toFixed(4) : "0";
-  const uy       = R > 0 ? (sedang / R).toFixed(4) : "0";
+  const ux       = R > 0 ? (ringan / R).toFixed(4) : "0";          // komponen X unit vektor
+  const uy       = R > 0 ? (sedang / R).toFixed(4) : "0";          // komponen Y unit vektor
 
+  // Hitung padding dan area gambar yang bisa dipakai
   const pad  = { left: W * 0.14, right: W * 0.06, top: H * 0.08, bottom: H * 0.14 };
-  const ox   = pad.left;
-  const oy   = H - pad.bottom;
-  const gW   = W - pad.left - pad.right;
-  const gH   = H - pad.top  - pad.bottom;
+  const ox   = pad.left;             // titik origin X (pojok kiri bawah grid)
+  const oy   = H - pad.bottom;       // titik origin Y
+  const gW   = W - pad.left - pad.right;   // lebar area grid
+  const gH   = H - pad.top  - pad.bottom;  // tinggi area grid
 
+  // Skala: nilai terbesar mengisi 78% ruang — biar panah tidak keluar batas
   const maxVal = Math.max(ringan, sedang, 100);
   const scale  = (Math.min(gW, gH) * 0.78) / maxVal;
-  const px     = ox + ringan * scale;
-  const py     = oy - sedang * scale;
+  const px     = ox + ringan * scale;   // posisi ujung komponen X
+  const py     = oy - sedang * scale;   // posisi ujung komponen Y
 
+  /* Hitung step grid yang enak dibaca (10, 20, 25, 50, 100, dst) */
   function hitungStep(max) {
     for (const c of [10,20,25,50,100,150,200,250,500,1000]) {
-      if (max / c <= 8) return c;
+      if (max / c <= 8) return c;  // maksimal 8 garis biar tidak terlalu rapat
     }
     return Math.ceil(max / 5 / 100) * 100;
   }
 
+  /* Gambar kepala panah (segitiga) di ujung vektor */
   function kepalaPanah(x, y, angle, color) {
-    const s = Math.max(8, W * 0.014);
+    const s = Math.max(8, W * 0.014);   // ukuran kepala panah proporsional dengan canvas
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.moveTo(x, y);
@@ -576,6 +698,7 @@ function gambarVektor() {
     ctx.fill();
   }
 
+  /* Gambar latar grid kartesian + sumbu + label */
   function gambarGrid() {
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = "#fafbff";
@@ -584,7 +707,7 @@ function gambarVektor() {
     const step = hitungStep(maxVal);
     const fs   = Math.max(10, W * 0.017);
 
-    // Grid lines
+    // Gambar garis-garis grid (vertikal dan horizontal)
     ctx.strokeStyle = "#e2e8f0";
     ctx.lineWidth   = 1;
     for (let v = 0; v <= maxVal + step; v += step) {
@@ -598,7 +721,7 @@ function gambarVektor() {
       }
     }
 
-    // Tick labels
+    // Label nilai di tiap garis grid (sumbu X di bawah, sumbu Y di kiri)
     ctx.font      = `${fs}px Segoe UI`;
     ctx.fillStyle = "#94a3b8";
     ctx.textAlign = "center";
@@ -613,62 +736,69 @@ function gambarVektor() {
       }
     }
 
-    // Sumbu X
+    // Gambar sumbu X dengan panah di ujungnya
     ctx.strokeStyle = "#334155"; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ox + gW + 12, oy); ctx.stroke();
     kepalaPanah(ox + gW + 12, oy, 0, "#334155");
 
-    // Sumbu Y
+    // Gambar sumbu Y dengan panah di ujungnya
     ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ox, pad.top - 12); ctx.stroke();
     kepalaPanah(ox, pad.top - 12, -Math.PI/2, "#334155");
 
-    // Label sumbu
+    // Label nama sumbu X dan Y
     const fsL = Math.max(11, W * 0.019);
     ctx.font = `600 ${fsL}px Segoe UI`;
     ctx.fillStyle = "#475569"; ctx.textAlign = "center";
     ctx.fillText("Komponen X — Alat Ringan ≤100W (Watt)", ox + gW/2, oy + 36);
     ctx.save();
     ctx.translate(ox - 42, oy - gH/2);
-    ctx.rotate(-Math.PI/2);
+    ctx.rotate(-Math.PI/2);  // putar 90° buat label sumbu Y
     ctx.fillText("Komponen Y — Alat Berat >100W (Watt)", 0, 0);
     ctx.restore();
 
-    // Origin
+    // Label titik origin
     ctx.fillStyle = "#94a3b8"; ctx.font = `${fs}px Segoe UI`; ctx.textAlign = "right";
     ctx.fillText("O(0,0)", ox - 5, oy + 16);
   }
 
-  // Animasi
-  if (vektorAnimFrame) cancelAnimationFrame(vektorAnimFrame);
+  /* =====================================================
+     ANIMASI SEQUENTIAL TIGA FASE
+     DX, DY, DR = durasi animasi tiap vektor (ms)
+     JEDA = jeda antar fase biar tidak langsung semua muncul
+     easeOut cubic: gerakan melambat di akhir — lebih natural
+  ====================================================== */
+  if (vektorAnimFrame) cancelAnimationFrame(vektorAnimFrame); // batalkan animasi sebelumnya
   const DX=700, DY=700, DR=800, JEDA=250, TOTAL=DX+JEDA+DY+JEDA+DR;
   let startTime = null;
 
+  /* Fungsi easing: mulai cepat, melambat di ujung */
   function easeOut(t) { return 1 - Math.pow(1-t, 3); }
 
   function animate(ts) {
     if (!startTime) startTime = ts;
-    const el = ts - startTime;
+    const el = ts - startTime;   // elapsed time sejak animasi mulai
 
-    gambarGrid();
+    gambarGrid(); // gambar ulang grid tiap frame biar bersih
 
     const fs = Math.max(11, W * 0.018);
     ctx.font = `600 ${fs}px Segoe UI`;
 
-    // Fase X
-    const tX = Math.min(el / DX, 1);
+    // --- FASE 1: Vektor X (hijau) ---
+    const tX = Math.min(el / DX, 1);   // progress 0-1
     if (tX > 0 && ringan > 0) {
-      const curX = ox + ringan * scale * easeOut(tX);
+      const curX = ox + ringan * scale * easeOut(tX);  // posisi ujung saat ini
       ctx.strokeStyle = "#22c55e"; ctx.fillStyle = "#22c55e";
       ctx.lineWidth = Math.max(3, W * 0.005);
       ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(curX, oy); ctx.stroke();
       kepalaPanah(curX, oy, 0, "#22c55e");
+      // Label X muncul setelah animasi selesai
       if (tX >= 1) {
         ctx.textAlign = "center";
         ctx.fillText(`X = ${ringan} W`, (ox+px)/2, oy - 14);
       }
     }
 
-    // Fase Y
+    // --- FASE 2: Vektor Y (kuning) — mulai setelah X + jeda ---
     const startY = DX + JEDA;
     if (el > startY && sedang > 0) {
       const tY   = Math.min((el - startY) / DY, 1);
@@ -683,10 +813,11 @@ function gambarVektor() {
       }
     }
 
-    // Fase R
+    // --- FASE 3: Resultan R (biru) — mulai setelah Y + jeda ---
     const startR = startY + DY + JEDA;
     if (el > startR && R > 0) {
       const tR   = Math.min((el - startR) / DR, 1);
+      // Interpolasi dari origin ke titik ujung (px, py)
       const curPx = ox + (px - ox) * easeOut(tR);
       const curPy = oy + (py - oy) * easeOut(tR);
       ctx.strokeStyle = "#3d5afe"; ctx.fillStyle = "#3d5afe";
@@ -695,25 +826,25 @@ function gambarVektor() {
       kepalaPanah(curPx, curPy, Math.atan2(py-oy, px-ox), "#3d5afe");
 
       if (tR >= 1) {
-        // Label R
+        // Label |R| di tengah panah resultan
         const fsB = Math.max(12, W * 0.02);
         ctx.font = `700 ${fsB}px Segoe UI`;
         ctx.fillStyle = "#1d4ed8"; ctx.textAlign = "left";
         ctx.fillText(`|R| = ${R.toFixed(1)} W`, (ox+px)/2 + 8, (oy+py)/2 - 12);
 
-        // Arc sudut θ
+        // Gambar busur sudut θ dengan garis putus-putus ungu
         if (ringan > 0 && sedang > 0) {
           const arcR = Math.min(gW, gH) * 0.14;
           ctx.beginPath();
           ctx.arc(ox, oy, arcR, -theta, 0, true);
           ctx.strokeStyle = "#a78bfa"; ctx.lineWidth = 2;
-          ctx.setLineDash([4,3]); ctx.stroke(); ctx.setLineDash([]);
+          ctx.setLineDash([4,3]); ctx.stroke(); ctx.setLineDash([]); // reset dash
           ctx.font = `600 ${Math.max(11, W*0.018)}px Segoe UI`;
           ctx.fillStyle = "#7c3aed"; ctx.textAlign = "left";
           ctx.fillText(`θ=${thetaDeg}°`, ox + arcR + 6, oy - arcR * 0.35);
         }
 
-        // Titik ujung + koordinat
+        // Titik koordinat ujung resultan
         ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI*2);
         ctx.fillStyle = "#3d5afe"; ctx.fill();
         ctx.font = `${Math.max(11,W*0.017)}px Segoe UI`;
@@ -722,12 +853,13 @@ function gambarVektor() {
       }
     }
 
+    // Lanjutkan animasi sampai semua fase selesai
     if (el < TOTAL) vektorAnimFrame = requestAnimationFrame(animate);
   }
 
   vektorAnimFrame = requestAnimationFrame(animate);
 
-  // Update rumus
+  /* Update panel rumus dengan angka nyata hasil kalkulasi */
   document.getElementById("rumus-magnitude").innerText =
     `|R| = √(${ringan}² + ${sedang}²) = √${ringan**2+sedang**2} = ${R.toFixed(4)} W`;
   document.getElementById("rumus-sudut").innerText =
@@ -735,7 +867,7 @@ function gambarVektor() {
   document.getElementById("rumus-unit").innerText = `R̂ = ${ux}î + ${uy}ĵ`;
   document.getElementById("rumus-vektor").innerText = `R = ${ringan}î + ${sedang}ĵ  (Watt)`;
 
-  // Update output angka
+  /* Update baris ringkasan angka di bawah canvas */
   document.getElementById("vektor-output").innerHTML = `
     <span>🟢 Komponen X: <b>${ringan} W</b></span>
     <span>🔵 Resultan |R|: <b>${R.toFixed(2)} W</b></span>
@@ -743,7 +875,7 @@ function gambarVektor() {
     <span>📐 Sudut θ: <b>${thetaDeg}°</b></span>
   `;
 
-  // Step-by-step
+  /* Update panel langkah perhitungan step-by-step */
   const lR = detailRingan.length ? detailRingan.map(r=>`${r.nama}(${r.watt}W)`).join(", ") : "—";
   const lS = detailSedang.length ? detailSedang.map(r=>`${r.nama}(${r.watt}W)`).join(", ") : "—";
   document.getElementById("edukasi-steps").innerHTML = `
@@ -817,13 +949,18 @@ function gambarVektor() {
   `;
 }
 
-/* ==================================================
-   SIMULASI HEMAT (dengan slider interaktif)
-================================================== */
+
+/* =====================================================
+   SIMULASI HEMAT — BUAT BARIS SLIDER
+   Tiap alat dapat slider sendiri dengan range 0 sampai
+   jam aslinya. Data disimpan di dataset (data-*) biar
+   hitungHemat() bisa baca tanpa perlu akses lastResults.
+====================================================== */
 function updateSimulasi() {
   const wrap = document.getElementById("simulasi-list");
   wrap.innerHTML = "";
 
+  // Hitung hari bulan ini — sama seperti di prosesData()
   const hariSebulan = new Date(
     new Date().getFullYear(),
     new Date().getMonth() + 1,
@@ -836,10 +973,12 @@ function updateSimulasi() {
     div.innerHTML = `
       <div class="sim-top">
         <span class="sim-nama">${alat.nama}</span>
+        <!-- Teks penghematan diisi hitungHemat() waktu slider digeser -->
         <span class="sim-saving" id="saving-${i}"></span>
       </div>
       <div class="sim-bottom">
         <span>${alat.jam} jam asli</span>
+        <!-- Slider mulai dari nilai maksimal (jam asli) — digeser ke kiri untuk hemat -->
         <input
           type="range"
           class="sim-slider"
@@ -849,37 +988,50 @@ function updateSimulasi() {
           data-jam-asli="${alat.jam}"
           oninput="hitungHemat(this, ${hariSebulan})"
         >
+        <!-- Angka jam yang sekarang dipilih slider — update real-time -->
         <span class="sim-jam-baru" id="jam-baru-${i}">${alat.jam} jam</span>
       </div>
     `;
     wrap.appendChild(div);
   });
 
+  // Sembunyikan kotak total hemat di awal (belum ada slider yang digeser)
   const totalEl = document.getElementById("total-hemat");
   totalEl.style.display = "none";
 }
 
+
+/* =====================================================
+   HITUNG HEMAT PER SLIDER
+   Dipanggil setiap kali slider digeser (oninput).
+   Hitung selisih kWh dan Rp antara jam asli vs jam baru,
+   lalu hitung total hemat dari semua slider sekaligus.
+====================================================== */
 function hitungHemat(slider, hariSebulan) {
   const i       = parseInt(slider.dataset.index);
   const watt    = parseFloat(slider.dataset.watt);
   const jamAsli = parseFloat(slider.dataset.jamAsli);
   const jamBaru = parseFloat(slider.value);
 
+  // Update teks jam yang dipilih di sebelah kanan slider
   document.getElementById(`jam-baru-${i}`).innerText = jamBaru.toFixed(1) + " jam";
 
+  // Hitung penghematan untuk alat ini saja
   const kwhHemat = (watt * (jamAsli - jamBaru) * hariSebulan) / 1000;
   const rpHemat  = kwhHemat * currentTarif;
 
+  // Tampilkan teks "Hemat Rp X.XXX" kalau ada penghematan, kosongkan kalau tidak ada
   document.getElementById(`saving-${i}`).innerText =
     rpHemat > 0 ? `Hemat Rp ${Math.round(rpHemat).toLocaleString("id-ID")}` : "";
 
-  // Total semua slider
+  // Hitung total hemat dari semua slider yang ada di halaman
   let totalHemat = 0;
   document.querySelectorAll(".sim-slider").forEach(s => {
     const kwhS = (parseFloat(s.dataset.watt) * (parseFloat(s.dataset.jamAsli) - parseFloat(s.value)) * hariSebulan) / 1000;
     totalHemat += kwhS * currentTarif;
   });
 
+  // Tampilkan atau sembunyikan kotak total hemat
   const totalEl = document.getElementById("total-hemat");
   if (totalHemat > 0) {
     totalEl.style.display = "block";
